@@ -15,6 +15,8 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <index.h>
+
 
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
@@ -81,6 +83,62 @@ int tree_parse(const void *data, size_t len, Tree *tree_out) {
 // Helper for qsort to ensure consistent tree hashing
 static int compare_tree_entries(const void *a, const void *b) {
     return strcmp(((const TreeEntry *)a)->name, ((const TreeEntry *)b)->name);
+}
+
+static int write_tree_level(IndexEntry *entries, int count,
+                             const char *prefix, int prefix_len,
+                             ObjectID *id_out) {
+    Tree tree;
+    tree.count = 0;
+
+    int i = 0;
+    while (i < count) {
+        const char *path = entries[i].path + prefix_len;
+        const char *slash = strchr(path, '/');
+
+        if (!slash) {
+            // Direct file entry
+            TreeEntry *te = &tree.entries[tree.count++];
+            te->mode = entries[i].mode;
+            te->hash = entries[i].hash;
+            strncpy(te->name, path, sizeof(te->name)-1);
+            i++;
+        } else {
+            // Directory: group all entries sharing this prefix
+            int dir_len = (int)(slash - path);
+            char dir_name[256];
+            strncpy(dir_name, path, dir_len);
+            dir_name[dir_len] = '\0';
+
+            // Count entries in this subdirectory
+            int j = i;
+            int new_prefix_len = prefix_len + dir_len + 1;
+            while (j < count) {
+                const char *p = entries[j].path + prefix_len;
+                if (strncmp(p, dir_name, dir_len) == 0 && p[dir_len] == '/')
+                    j++;
+                else
+                    break;
+            }
+
+            ObjectID subtree_id;
+            if (write_tree_level(entries + i, j - i,
+                                  entries[i].path, new_prefix_len,
+                                  &subtree_id) != 0) return -1;
+
+            TreeEntry *te = &tree.entries[tree.count++];
+            te->mode = 0040000;
+            te->hash = subtree_id;
+            strncpy(te->name, dir_name, sizeof(te->name)-1);
+            i = j;
+        }
+    }
+
+    void *data; size_t data_len;
+    if (tree_serialize(&tree, &data, &data_len) != 0) return -1;
+    int rc = object_write(OBJ_TREE, data, data_len, id_out);
+    free(data);
+    return rc;
 }
 
 // Serialize a Tree struct into binary format for storage.
