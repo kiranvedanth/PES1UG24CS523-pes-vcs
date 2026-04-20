@@ -137,11 +137,27 @@ static int compare_entries_by_path(const void *a, const void *b) {
 //
 // Returns 0 on success, -1 on error.
 int index_load(Index *index) {
-    // TODO: Implement index loading
-    // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+    index->count = 0;
+    FILE *f = fopen(INDEX_FILE, "r");
+    if (!f) return 0;  // empty index, not an error
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = '\0';
+        if (!line[0]) continue;
+        IndexEntry *e = &index->entries[index->count];
+        char hex[HASH_HEX_SIZE+1]; unsigned int mode;
+        unsigned long long mtime; unsigned int size; char path[512];
+        if (sscanf(line, "%o %64s %llu %u %511s",
+                   &mode, hex, &mtime, &size, path) != 5) continue;
+        e->mode = mode; e->mtime_sec = mtime; e->size = size;
+        strncpy(e->path, path, sizeof(e->path)-1);
+        if (hex_to_hash(hex, &e->hash) != 0) continue;
+        index->count++;
+    }
+    fclose(f);
+    return 0;
 }
+
 
 // Save the index to .pes/index atomically.
 //
