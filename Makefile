@@ -43,3 +43,6 @@ test-unit: test_objects test_tree
 test-integration: pes
 	@echo "=== Running integration tests ==="
 	bash test_sequence.sh
+test_tree: test_tree.o object.o tree.o index.o
+	gcc -o test_tree test_tree.o object.o tree.o index.o -lcrypto
+
